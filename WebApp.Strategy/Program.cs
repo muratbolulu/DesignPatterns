@@ -2,6 +2,8 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using WebApp.Strategy.Models;
+using WebApp.Strategy.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +15,31 @@ builder.Services.AddIdentity<AppUser, IdentityRole>(options =>
     options.User.RequireUniqueEmail = true;
 }).AddEntityFrameworkStores<AppIdentityDbContext>()
   .AddDefaultTokenProviders();
+
+
+#region strategy design Pattern add ioc.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IProductRepository>(sp =>
+{
+
+    var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
+
+    var claim = httpContextAccessor.HttpContext.User.Claims.Where(x => x.Type == Settings.ClaimDatabaseType).FirstOrDefault();
+
+    var context = sp.GetRequiredService<AppIdentityDbContext>();
+
+    if (claim == null) return new ProductRepositoryFromSqlServer(context);
+
+    var databaseType = (EDatabaseType)int.Parse(claim.Value);
+    return databaseType switch
+    {
+        EDatabaseType.SqlServer => new ProductRepositoryFromSqlServer(context),
+        EDatabaseType.MongoDb => new ProductRepositoryFromMongoDb(builder.Configuration),
+        _ => throw new NotImplementedException()
+    };
+
+});
+#endregion
 
 var app = builder.Build();
 
@@ -27,7 +54,7 @@ using (var scope = app.Services.CreateAsyncScope())
     await identityDbContext.Database.MigrateAsync();
 
     // Kullanıcılar var mı kontrol et
-    if (! await userManager.Users.AnyAsync())
+    if (!await userManager.Users.AnyAsync())
     {
         var users = new List<AppUser>
             {
@@ -51,11 +78,11 @@ using (var scope = app.Services.CreateAsyncScope())
 
     }
 }
-    #endregion
+#endregion
 
 
-    // Configure the HTTP request pipeline.
-    if (!app.Environment.IsDevelopment())
+// Configure the HTTP request pipeline.
+if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
 }
